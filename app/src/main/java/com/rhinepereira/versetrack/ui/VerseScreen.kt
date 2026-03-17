@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -26,6 +27,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rhinepereira.versetrack.data.BibleData
+import com.rhinepereira.versetrack.data.BibleDatabaseHelper
 import com.rhinepereira.versetrack.data.Note
 import com.rhinepereira.versetrack.data.NoteWithVerses
 import com.rhinepereira.versetrack.data.Verse
@@ -484,6 +486,9 @@ fun AddNoteDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
 
 @Composable
 fun AddVerseDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+    val context = LocalContext.current
+    val bibleHelper = remember { BibleDatabaseHelper(context) }
+    
     var bookInput by remember { mutableStateOf("") }
     var filteredBooks by remember { mutableStateOf(emptyList<String>()) }
     var expanded by remember { mutableStateOf(false) }
@@ -492,6 +497,8 @@ fun AddVerseDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
     var verseStart by remember { mutableStateOf("") }
     var verseEnd by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
+    
+    var showVerseFetchConfirmation by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -570,6 +577,26 @@ fun AddVerseDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
                     minLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
+                
+                Button(
+                    onClick = {
+                        val c = chapter.toIntOrNull()
+                        val v = verseStart.toIntOrNull()
+                        val ve = verseEnd.toIntOrNull()
+                        if (bookInput.isNotBlank() && c != null && v != null) {
+                            val fetched = bibleHelper.getVerseRange(bookInput, c, v, ve)
+                            if (fetched != null) {
+                                showVerseFetchConfirmation = fetched
+                            } else {
+                                // Handle not found (optional toast)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = bookInput.isNotBlank() && chapter.isNotBlank() && verseStart.isNotBlank()
+                ) {
+                    Text("Fetch Verse from Bible.db")
+                }
             }
         },
         confirmButton = {
@@ -588,4 +615,21 @@ fun AddVerseDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+    
+    showVerseFetchConfirmation?.let { fetchedContent ->
+        AlertDialog(
+            onDismissRequest = { showVerseFetchConfirmation = null },
+            title = { Text("Use this verse content?") },
+            text = { Text(fetchedContent) },
+            confirmButton = {
+                Button(onClick = {
+                    content = fetchedContent
+                    showVerseFetchConfirmation = null
+                }) { Text("Yes, use it") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVerseFetchConfirmation = null }) { Text("No") }
+            }
+        )
+    }
 }

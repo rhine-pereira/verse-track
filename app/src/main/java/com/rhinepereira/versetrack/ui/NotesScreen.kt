@@ -1,6 +1,11 @@
 package com.rhinepereira.versetrack.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -9,12 +14,14 @@ import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
@@ -25,17 +32,28 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rhinepereira.versetrack.data.PersonalNote
 import com.rhinepereira.versetrack.data.PersonalNoteCategory
+import com.rhinepereira.versetrack.data.BibleData
+import com.rhinepereira.versetrack.data.BibleDatabaseHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -54,9 +72,7 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
 
     if (noteToEdit != null) {
         Dialog(
-            onDismissRequest = { 
-                noteToEdit = null 
-            },
+            onDismissRequest = { noteToEdit = null },
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
                 decorFitsSystemWindows = false
@@ -96,9 +112,6 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
                     text = { Icon(Icons.Default.Add, contentDescription = "Add Category") }
                 )
             }
-        } else {
-            // Initial state if categories haven't loaded yet
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
 
         Box(modifier = Modifier.weight(1f)) {
@@ -106,12 +119,12 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
                 state = pagerState,
                 modifier = Modifier.fillMaxSize()
             ) { pageIndex ->
-                val category = categories[pageIndex]
+                val category = categories.getOrNull(pageIndex) ?: return@HorizontalPager
                 val notes by viewModel.getNotesForCategory(category.id).collectAsState(initial = emptyList())
                 
                 if (notes.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No notes in ${category.name} yet.", color = MaterialTheme.colorScheme.outline)
+                        Text("No notes here yet.", color = MaterialTheme.colorScheme.outline)
                     }
                 } else {
                     LazyVerticalStaggeredGrid(
@@ -195,6 +208,7 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
 
 @Composable
 fun KeepNoteItem(note: PersonalNote, onClick: () -> Unit, onDelete: () -> Unit) {
+    val previewHighlight = MaterialTheme.colorScheme.primary
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -222,12 +236,14 @@ fun KeepNoteItem(note: PersonalNote, onClick: () -> Unit, onDelete: () -> Unit) 
                 }
             }
             if (note.title.isNotBlank()) Spacer(modifier = Modifier.height(4.dp))
+            
             Text(
-                text = note.content,
+                text = parseMarkdown(note.content, hideMarkers = true, highlightColor = previewHighlight),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 8,
                 overflow = TextOverflow.Ellipsis
             )
+            
             Spacer(modifier = Modifier.height(8.dp))
             val df = SimpleDateFormat("dd MMM", Locale.getDefault())
             Text(
@@ -249,16 +265,36 @@ fun FullScreenNoteEditor(
     var title by remember { mutableStateOf(note.title) }
     var contentValue by remember { mutableStateOf(TextFieldValue(note.content)) }
     val scrollState = rememberScrollState()
+    val context = LocalContext.current
+    val bibleHelper = remember { BibleDatabaseHelper(context) }
+    val boldColor = MaterialTheme.colorScheme.primary
+    
+    var detectedReference by remember { mutableStateOf<BibleRef?>(null) }
 
-    // Auto-save logic: Debounced save to Room
     LaunchedEffect(title, contentValue.text) {
         if (title != note.title || contentValue.text != note.content) {
-            delay(1000) // Wait for 1 second of inactivity
+            delay(1000)
             onSave(title, contentValue.text)
         }
     }
 
-    // Final save on exit
+    LaunchedEffect(contentValue) {
+        val text = contentValue.text
+        val selection = contentValue.selection
+        if (selection.collapsed && text.isNotEmpty()) {
+            val textBeforeCursor = text.take(selection.start)
+            val lastLine = textBeforeCursor.split("\n").lastOrNull() ?: ""
+            
+            if (lastLine.isNotBlank() && !lastLine.contains(" - ") && !lastLine.contains("**")) {
+                detectedReference = findBibleReference(lastLine)
+            } else {
+                detectedReference = null
+            }
+        } else {
+            detectedReference = null
+        }
+    }
+
     val dismissAndSave = {
         onSave(title, contentValue.text)
         onDismiss()
@@ -279,33 +315,113 @@ fun FullScreenNoteEditor(
             )
         },
         bottomBar = {
-            Surface(tonalElevation = 3.dp) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.ime)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Column {
+                AnimatedVisibility(
+                    visible = detectedReference != null,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
                 ) {
-                    IconButton(onClick = { contentValue = applyFormat(contentValue, "**") }) {
-                        Icon(Icons.Default.FormatBold, contentDescription = "Bold")
-                    }
-                    IconButton(onClick = { contentValue = applyFormat(contentValue, "_") }) {
-                        Icon(Icons.Default.FormatItalic, contentDescription = "Italic")
-                    }
-                    IconButton(onClick = { 
-                        val newText = if (contentValue.text.endsWith("\n") || contentValue.text.isEmpty()) {
-                            contentValue.text + "1. "
-                        } else {
-                            contentValue.text + "\n1. "
+                    detectedReference?.let { ref ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            tonalElevation = 4.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    val refLabel = "${ref.book} ${ref.chapter}:${ref.verse}${if (ref.endVerse != null) "-${ref.endVerse}" else ""}"
+                                    Text(
+                                        text = "Add $refLabel",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Row {
+                                    TextButton(onClick = { detectedReference = null }) {
+                                        Text("Ignore")
+                                    }
+                                    Button(onClick = {
+                                        val fetched = bibleHelper.getVerseRange(ref.book, ref.chapter, ref.verse, ref.endVerse)
+                                        if (fetched != null) {
+                                            val referenceText = "**${ref.book} ${ref.chapter}:${ref.verse}${if (ref.endVerse != null) "-${ref.endVerse}" else ""}**"
+                                            
+                                            val text = contentValue.text
+                                            val selection = contentValue.selection
+                                            val textBeforeCursor = text.take(selection.start)
+                                            val textAfterCursor = text.substring(selection.end)
+                                            val lineStart = textBeforeCursor.lastIndexOf('\n') + 1
+                                            val currentLine = textBeforeCursor.substring(lineStart)
+                                            
+                                            val books = BibleData.catholicBooks.joinToString("|") { Regex.escape(it) }
+                                            val regex = Regex("""\b(${books})\s+(\d+):(\d+)(?:-(\d+))?\b""", RegexOption.IGNORE_CASE)
+                                            val match = regex.find(currentLine)
+                                            
+                                            val newText: String
+                                            val newSelection: TextRange
+                                            
+                                            if (match != null) {
+                                                val lineBeforeMatch = currentLine.take(match.range.first)
+                                                val lineAfterMatch = currentLine.substring(match.range.last + 1)
+                                                val replacement = "$referenceText - $fetched"
+                                                val newLine = lineBeforeMatch + replacement + lineAfterMatch
+                                                newText = text.take(lineStart) + newLine + "\n" + textAfterCursor
+                                                newSelection = TextRange(lineStart + lineBeforeMatch.length + replacement.length + 1)
+                                            } else {
+                                                val appendText = "\n$referenceText - $fetched\n"
+                                                newText = text.take(selection.start) + appendText + textAfterCursor
+                                                newSelection = TextRange(selection.start + appendText.length)
+                                            }
+                                            
+                                            contentValue = contentValue.copy(text = newText, selection = newSelection)
+                                        }
+                                        detectedReference = null 
+                                    }) {
+                                        Text("Add")
+                                    }
+                                }
+                            }
                         }
-                        contentValue = contentValue.copy(text = newText, selection = TextRange(newText.length))
-                    }) {
-                        Icon(Icons.Default.FormatListNumbered, contentDescription = "Numbered List")
+                    }
+                }
+
+                Surface(tonalElevation = 3.dp) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.ime)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IconButton(onClick = { contentValue = applyFormat(contentValue, "**") }) {
+                            Icon(Icons.Default.FormatBold, contentDescription = "Bold")
+                        }
+                        IconButton(onClick = { contentValue = applyFormat(contentValue, "_") }) {
+                            Icon(Icons.Default.FormatItalic, contentDescription = "Italic")
+                        }
+                        IconButton(onClick = { 
+                            val newText = if (contentValue.text.endsWith("\n") || contentValue.text.isEmpty()) {
+                                contentValue.text + "1. "
+                            } else {
+                                contentValue.text + "\n1. "
+                            }
+                            contentValue = contentValue.copy(text = newText, selection = TextRange(newText.length))
+                        }) {
+                            Icon(Icons.Default.FormatListNumbered, contentDescription = "Numbered List")
+                        }
                     }
                 }
             }
-        }
+        },
+        contentWindowInsets = WindowInsets.statusBars
     ) { padding ->
         Column(
             modifier = Modifier
@@ -343,23 +459,103 @@ fun FullScreenNoteEditor(
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent
                 ),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                visualTransformation = MarkdownVisualTransformation(boldColor)
             )
             Spacer(modifier = Modifier.height(100.dp))
         }
     }
 }
 
+class MarkdownVisualTransformation(private val boldColor: Color) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        // Identity mapping requires original and transformed lengths to be identical.
+        return TransformedText(
+            text = parseMarkdown(text.text, hideMarkers = false, highlightColor = boldColor),
+            offsetMapping = OffsetMapping.Identity
+        )
+    }
+}
+
+fun parseMarkdown(text: String, hideMarkers: Boolean, highlightColor: Color): AnnotatedString = buildAnnotatedString {
+    var i = 0
+    val markerStyle = SpanStyle(color = Color.Gray.copy(alpha = 0.2f))
+    while (i < text.length) {
+        when {
+            text.startsWith("**", i) -> {
+                val end = text.indexOf("**", i + 2)
+                if (end != -1) {
+                    if (hideMarkers) {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = highlightColor)) {
+                            append(text.substring(i + 2, end))
+                        }
+                    } else {
+                        withStyle(markerStyle) { append("**") }
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = highlightColor)) {
+                            append(text.substring(i + 2, end))
+                        }
+                        withStyle(markerStyle) { append("**") }
+                    }
+                    i = end + 2
+                } else {
+                    append(text[i])
+                    i++
+                }
+            }
+            text.startsWith("_", i) -> {
+                val end = text.indexOf("_", i + 1)
+                if (end != -1) {
+                    if (hideMarkers) {
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                            append(text.substring(i + 1, end))
+                        }
+                    } else {
+                        withStyle(markerStyle) { append("_") }
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                            append(text.substring(i + 1, end))
+                        }
+                        withStyle(markerStyle) { append("_") }
+                    }
+                    i = end + 1
+                } else {
+                    append(text[i])
+                    i++
+                }
+            }
+            else -> {
+                append(text[i])
+                i++
+            }
+        }
+    }
+}
+
+data class BibleRef(val book: String, val chapter: Int, val verse: Int, val endVerse: Int? = null)
+
+fun findBibleReference(line: String): BibleRef? {
+    val books = BibleData.catholicBooks.joinToString("|") { Regex.escape(it) }
+    val regex = Regex("""\b(${books})\s+(\d+):(\d+)(?:-(\d+))?\b""", RegexOption.IGNORE_CASE)
+    
+    val match = regex.find(line)
+    if (match != null) {
+        return BibleRef(
+            book = match.groupValues[1],
+            chapter = match.groupValues[2].toInt(),
+            verse = match.groupValues[3].toInt(),
+            endVerse = match.groupValues[4].takeIf { it.isNotEmpty() }?.toInt()
+        )
+    }
+    return null
+}
+
 fun handleAutoList(oldValue: TextFieldValue, newValue: TextFieldValue): TextFieldValue {
-    // Only trigger if a single character was added and it's a newline
     if (newValue.text.length != oldValue.text.length + 1) return newValue
     if (newValue.text[newValue.selection.start - 1] != '\n') return newValue
 
-    val textBeforeNewline = newValue.text.substring(0, newValue.selection.start - 1)
+    val textBeforeNewline = newValue.text.take(newValue.selection.start - 1)
     val lastLineStart = textBeforeNewline.lastIndexOf('\n') + 1
     val lastLine = textBeforeNewline.substring(lastLineStart)
 
-    // Check for ordered list: "1. "
     val orderedListRegex = Regex("""^(\d+)\.\s+(.*)$""")
     val orderedMatch = orderedListRegex.find(lastLine)
     if (orderedMatch != null) {
@@ -367,17 +563,15 @@ fun handleAutoList(oldValue: TextFieldValue, newValue: TextFieldValue): TextFiel
         val content = orderedMatch.groupValues[2]
         
         if (content.isEmpty()) {
-            // If the line was just "1. ", pressing enter removes it
-            val newText = newValue.text.substring(0, lastLineStart) + newValue.text.substring(newValue.selection.start)
+            val newText = newValue.text.take(lastLineStart) + newValue.text.substring(newValue.selection.start)
             return newValue.copy(text = newText, selection = TextRange(lastLineStart))
         }
         
         val prefix = "${number + 1}. "
-        val newText = newValue.text.substring(0, newValue.selection.start) + prefix + newValue.text.substring(newValue.selection.start)
+        val newText = newValue.text.take(newValue.selection.start) + prefix + newValue.text.substring(newValue.selection.start)
         return newValue.copy(text = newText, selection = TextRange(newValue.selection.start + prefix.length))
     }
 
-    // Check for bullet list: "- " or "* "
     val bulletListRegex = Regex("""^([-*])\s+(.*)$""")
     val bulletMatch = bulletListRegex.find(lastLine)
     if (bulletMatch != null) {
@@ -385,28 +579,27 @@ fun handleAutoList(oldValue: TextFieldValue, newValue: TextFieldValue): TextFiel
         val content = bulletMatch.groupValues[2]
         
         if (content.isEmpty()) {
-            val newText = newValue.text.substring(0, lastLineStart) + newValue.text.substring(newValue.selection.start)
+            val newText = newValue.text.take(lastLineStart) + newValue.text.substring(newValue.selection.start)
             return newValue.copy(text = newText, selection = TextRange(lastLineStart))
         }
         
         val prefix = "$bullet "
-        val newText = newValue.text.substring(0, newValue.selection.start) + prefix + newValue.text.substring(newValue.selection.start)
+        val newText = newValue.text.take(newValue.selection.start) + prefix + newValue.text.substring(newValue.selection.start)
         return newValue.copy(text = newText, selection = TextRange(newValue.selection.start + prefix.length))
     }
     
-    // Check for checklist: "- [ ] "
-    val checklistRegex = Regex("""^(-\s\[\s\]\s)(.*)$""")
+    val checklistRegex = Regex("""^(-\s\[\s]\s)(.*)$""")
     val checklistMatch = checklistRegex.find(lastLine)
     if (checklistMatch != null) {
         val prefix = checklistMatch.groupValues[1]
         val content = checklistMatch.groupValues[2]
         
         if (content.isEmpty()) {
-            val newText = newValue.text.substring(0, lastLineStart) + newValue.text.substring(newValue.selection.start)
+            val newText = newValue.text.take(lastLineStart) + newValue.text.substring(newValue.selection.start)
             return newValue.copy(text = newText, selection = TextRange(lastLineStart))
         }
         
-        val newText = newValue.text.substring(0, newValue.selection.start) + prefix + newValue.text.substring(newValue.selection.start)
+        val newText = newValue.text.take(newValue.selection.start) + prefix + newValue.text.substring(newValue.selection.start)
         return newValue.copy(text = newText, selection = TextRange(newValue.selection.start + prefix.length))
     }
 
@@ -418,9 +611,9 @@ fun applyFormat(value: TextFieldValue, symbol: String): TextFieldValue {
     val text = value.text
     
     val formatted = if (selection.collapsed) {
-        text.substring(0, selection.start) + symbol + symbol + text.substring(selection.end)
+        text.take(selection.start) + symbol + symbol + text.substring(selection.end)
     } else {
-        text.substring(0, selection.start) + symbol + text.substring(selection.start, selection.end) + symbol + text.substring(selection.end)
+        text.take(selection.start) + symbol + text.substring(selection.start, selection.end) + symbol + text.substring(selection.end)
     }
     
     val newCursorPos = if (selection.collapsed) selection.start + symbol.length else selection.end + symbol.length * 2
