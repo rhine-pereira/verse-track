@@ -338,7 +338,7 @@ fun FullScreenNoteEditor(
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                     Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    val refLabel = "${ref.book} ${ref.chapter}:${ref.verse}${if (ref.endVerse != null) "-${ref.endVerse}" else ""}"
+                                    val refLabel = ref.originalText
                                     Text(
                                         text = "Add $refLabel",
                                         style = MaterialTheme.typography.bodyMedium,
@@ -350,9 +350,9 @@ fun FullScreenNoteEditor(
                                         Text("Ignore")
                                     }
                                     Button(onClick = {
-                                        val fetched = bibleHelper.getVerseRange(ref.book, ref.chapter, ref.verse, ref.endVerse)
+                                        val fetched = bibleHelper.getVerses(ref.book, ref.chapter, ref.verses)
                                         if (fetched != null) {
-                                            val referenceText = "**${ref.book} ${ref.chapter}:${ref.verse}${if (ref.endVerse != null) "-${ref.endVerse}" else ""}**"
+                                            val referenceText = ref.originalText
                                             
                                             val text = contentValue.text
                                             val selection = contentValue.selection
@@ -361,8 +361,10 @@ fun FullScreenNoteEditor(
                                             val lineStart = textBeforeCursor.lastIndexOf('\n') + 1
                                             val currentLine = textBeforeCursor.substring(lineStart)
                                             
-                                            val books = BibleData.catholicBooks.joinToString("|") { Regex.escape(it) }
-                                            val regex = Regex("""\b(${books})\s+(\d+):(\d+)(?:-(\d+))?\b""", RegexOption.IGNORE_CASE)
+                                            val booksList = BibleData.catholicBooks.toMutableList()
+                                            val abbrevList = BibleData.abbreviations.keys.toList()
+                                            val allPatterns = (booksList + abbrevList).sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
+                                            val regex = Regex("""\b(${allPatterns})\s+(\d+)(?::(\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*))?\b""", RegexOption.IGNORE_CASE)
                                             val match = regex.find(currentLine)
                                             
                                             val newText: String
@@ -371,12 +373,12 @@ fun FullScreenNoteEditor(
                                             if (match != null) {
                                                 val lineBeforeMatch = currentLine.take(match.range.first)
                                                 val lineAfterMatch = currentLine.substring(match.range.last + 1)
-                                                val replacement = "$referenceText - $fetched"
+                                                val replacement = "$referenceText\n$fetched"
                                                 val newLine = lineBeforeMatch + replacement + lineAfterMatch
                                                 newText = text.take(lineStart) + newLine + "\n" + textAfterCursor
                                                 newSelection = TextRange(lineStart + lineBeforeMatch.length + replacement.length + 1)
                                             } else {
-                                                val appendText = "\n$referenceText - $fetched\n"
+                                                val appendText = "\n$referenceText\n$fetched\n"
                                                 newText = text.take(selection.start) + appendText + textAfterCursor
                                                 newSelection = TextRange(selection.start + appendText.length)
                                             }
@@ -478,10 +480,26 @@ class MarkdownVisualTransformation(private val boldColor: Color) : VisualTransfo
 }
 
 fun parseMarkdown(text: String, hideMarkers: Boolean, highlightColor: Color): AnnotatedString = buildAnnotatedString {
-    var i = 0
+    if (text.isEmpty()) return@buildAnnotatedString
+    
     val markerStyle = SpanStyle(color = Color.Gray.copy(alpha = 0.2f))
+    val refHighlightColor = Color(0xFFFFD700) // Gold
+    
+    // Pre-calculate all Bible matches once for the entire text
+    val bibleMatches = BibleData.bibleRefRegex.findAll(text).toList()
+    
+    var i = 0
     while (i < text.length) {
+        // Check if current index is start of a Bible reference
+        val bibleMatch = bibleMatches.find { it.range.first == i }
+        
         when {
+            bibleMatch != null -> {
+                withStyle(SpanStyle(color = refHighlightColor, fontWeight = FontWeight.Medium)) {
+                    append(bibleMatch.value)
+                }
+                i += bibleMatch.value.length
+            }
             text.startsWith("**", i) -> {
                 val end = text.indexOf("**", i + 2)
                 if (end != -1) {
@@ -530,19 +548,44 @@ fun parseMarkdown(text: String, hideMarkers: Boolean, highlightColor: Color): An
     }
 }
 
-data class BibleRef(val book: String, val chapter: Int, val verse: Int, val endVerse: Int? = null)
+data class BibleRef(val book: String, val chapter: Int, val verses: List<Pair<Int, Int?>>, val originalText: String)
 
 fun findBibleReference(line: String): BibleRef? {
-    val books = BibleData.catholicBooks.joinToString("|") { Regex.escape(it) }
-    val regex = Regex("""\b(${books})\s+(\d+):(\d+)(?:-(\d+))?\b""", RegexOption.IGNORE_CASE)
+    val booksList = BibleData.catholicBooks.toMutableList()
+    val abbrevList = BibleData.abbreviations.keys.toList()
+    
+    val allPatterns = (booksList + abbrevList).sortedByDescending { it.length }.joinToString("|") { Regex.escape(it) }
+    
+    // Matches: Book Chapter[:VerseRange[, VerseRange]*]
+    // VerseRange is StartVerse[-EndVerse]
+    val regex = Regex("""\b(${allPatterns})\s+(\d+)(?::(\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*))?\b""", RegexOption.IGNORE_CASE)
     
     val match = regex.find(line)
     if (match != null) {
+        val matchedName = match.groupValues[1]
+        val chapter = match.groupValues[2].toInt()
+        val versesStr = match.groupValues[3]
+        
+        // Map abbreviation back to full name if necessary
+        val book = BibleData.abbreviations.entries.find { it.key.equals(matchedName, ignoreCase = true) }?.value 
+                  ?: matchedName
+        
+        val verseRanges = if (versesStr.isEmpty()) {
+            emptyList()
+        } else {
+            versesStr.split(",").map { rangeStr ->
+                val parts = rangeStr.trim().split("-")
+                val start = parts[0].toInt()
+                val end = if (parts.size > 1) parts[1].toInt() else null
+                start to end
+            }
+        }
+        
         return BibleRef(
-            book = match.groupValues[1],
-            chapter = match.groupValues[2].toInt(),
-            verse = match.groupValues[3].toInt(),
-            endVerse = match.groupValues[4].takeIf { it.isNotEmpty() }?.toInt()
+            book = book,
+            chapter = chapter,
+            verses = verseRanges,
+            originalText = match.value
         )
     }
     return null
