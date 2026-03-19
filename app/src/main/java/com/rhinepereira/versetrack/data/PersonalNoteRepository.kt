@@ -3,6 +3,7 @@ package com.rhinepereira.versetrack.data
 import android.content.Context
 import androidx.work.*
 import com.rhinepereira.versetrack.sync.SyncWorker
+import io.github.jan.supabase.gotrue.gotrue
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
@@ -10,22 +11,26 @@ import kotlinx.coroutines.withContext
 
 class PersonalNoteRepository(private val context: Context, private val verseDao: VerseDao) {
 
-    val allCategories: Flow<List<PersonalNoteCategory>> = verseDao.getAllCategories()
+    fun getAllCategories(userId: String): Flow<List<PersonalNoteCategory>> = verseDao.getAllCategories(userId)
 
     fun getNotesForCategory(categoryId: String): Flow<List<PersonalNote>> = verseDao.getNotesForCategory(categoryId)
 
+    private fun getCurrentUserId(): String {
+        return SupabaseConfig.client.gotrue.currentUserOrNull()?.id ?: ""
+    }
+
     suspend fun insertCategory(category: PersonalNoteCategory) {
-        verseDao.insertCategory(category.copy(isSynced = false))
+        verseDao.insertCategory(category.copy(isSynced = false, userId = getCurrentUserId()))
         scheduleSync()
     }
 
     suspend fun insertNote(note: PersonalNote) {
-        verseDao.insertPersonalNote(note.copy(isSynced = false))
+        verseDao.insertPersonalNote(note.copy(isSynced = false, userId = getCurrentUserId()))
         scheduleSync()
     }
 
     suspend fun updateNote(note: PersonalNote) {
-        verseDao.insertPersonalNote(note.copy(isSynced = false))
+        verseDao.insertPersonalNote(note.copy(isSynced = false, userId = getCurrentUserId()))
         scheduleSync()
     }
 

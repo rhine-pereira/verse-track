@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -23,15 +24,28 @@ sealed class Screen(val route: String, val title: String, val icon: androidx.com
     object PersonalNotes : Screen("personal_notes", "Notes", Icons.Default.MoreVert)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainContainer(
     sharedText: String? = null,
-    onSharedTextConsumed: () -> Unit = {}
+    onSharedTextConsumed: () -> Unit = {},
+    onSignOut: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val items = listOf(Screen.Themes, Screen.Daily, Screen.Calendar, Screen.PersonalNotes)
+    var showSignOutDialog by remember { mutableStateOf(false) }
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("VerseTrack") },
+                actions = {
+                    IconButton(onClick = { showSignOutDialog = true }) {
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Sign Out")
+                    }
+                }
+            )
+        },
         bottomBar = {
             NavigationBar {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -76,5 +90,28 @@ fun MainContainer(
                 NotesScreen()
             }
         }
+    }
+
+    if (showSignOutDialog) {
+        AlertDialog(
+            onDismissRequest = { showSignOutDialog = false },
+            title = { Text("Sign Out") },
+            text = { Text("Are you sure you want to sign out?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSignOutDialog = false
+                        onSignOut()
+                    }
+                ) {
+                    Text("Sign Out")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

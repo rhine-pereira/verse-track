@@ -32,6 +32,8 @@ data class DailyRecord(
     @SerialName("prophecy")
     val prophecy: String = "",
     
+    @SerialName("user_id")
+    val userId: String = "",
     @SerialName("created_at")
     val createdAt: Long = System.currentTimeMillis(),
     @SerialName("is_synced")

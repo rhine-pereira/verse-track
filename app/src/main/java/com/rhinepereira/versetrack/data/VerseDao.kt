@@ -6,11 +6,11 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface VerseDao {
     @Transaction
-    @Query("SELECT * FROM notes ORDER BY createdAt DESC")
-    fun getNotesWithVerses(): Flow<List<NoteWithVerses>>
+    @Query("SELECT * FROM notes WHERE userId = :userId ORDER BY createdAt DESC")
+    fun getNotesWithVerses(userId: String): Flow<List<NoteWithVerses>>
 
-    @Query("SELECT * FROM notes ORDER BY createdAt DESC")
-    fun getAllNotes(): Flow<List<Note>>
+    @Query("SELECT * FROM notes WHERE userId = :userId ORDER BY createdAt DESC")
+    fun getAllNotes(userId: String): Flow<List<Note>>
 
     @Query("SELECT * FROM verses WHERE noteId = :noteId ORDER BY createdAt DESC")
     fun getVersesForNote(noteId: String): Flow<List<Verse>>
@@ -40,14 +40,14 @@ interface VerseDao {
     suspend fun getUnsyncedNotes(): List<Note>
 
     // Daily Records
-    @Query("SELECT * FROM daily_records ORDER BY date DESC")
-    fun getAllDailyRecords(): Flow<List<DailyRecord>>
+    @Query("SELECT * FROM daily_records WHERE userId = :userId ORDER BY date DESC")
+    fun getAllDailyRecords(userId: String): Flow<List<DailyRecord>>
 
-    @Query("SELECT * FROM daily_records WHERE date >= :startOfDay AND date < :endOfDay LIMIT 1")
-    fun getRecordForDate(startOfDay: Long, endOfDay: Long): Flow<DailyRecord?>
+    @Query("SELECT * FROM daily_records WHERE userId = :userId AND date >= :startOfDay AND date < :endOfDay LIMIT 1")
+    fun getRecordForDate(userId: String, startOfToday: Long, endOfToday: Long): Flow<DailyRecord?>
 
-    @Query("SELECT * FROM daily_records WHERE date >= :startOfDay AND date < :endOfDay LIMIT 1")
-    suspend fun getRecordForDateSync(startOfDay: Long, endOfDay: Long): DailyRecord?
+    @Query("SELECT * FROM daily_records WHERE userId = :userId AND date >= :startOfDay AND date < :endOfDay LIMIT 1")
+    suspend fun getRecordForDateSync(userId: String, startOfDay: Long, endOfDay: Long): DailyRecord?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDailyRecord(record: DailyRecord)
@@ -59,8 +59,8 @@ interface VerseDao {
     suspend fun getUnsyncedDailyRecords(): List<DailyRecord>
 
     // Personal Notes
-    @Query("SELECT * FROM personal_note_categories ORDER BY createdAt ASC")
-    fun getAllCategories(): Flow<List<PersonalNoteCategory>>
+    @Query("SELECT * FROM personal_note_categories WHERE userId = :userId ORDER BY createdAt ASC")
+    fun getAllCategories(userId: String): Flow<List<PersonalNoteCategory>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCategory(category: PersonalNoteCategory)

@@ -4,8 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rhinepereira.versetrack.data.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import io.github.jan.supabase.gotrue.gotrue
+import io.github.jan.supabase.gotrue.SessionStatus
 import java.util.*
 
 class DailyViewModel(application: Application) : AndroidViewModel(application) {
@@ -23,13 +27,29 @@ class DailyViewModel(application: Application) : AndroidViewModel(application) {
         val startOfToday = getStartOfDay(System.currentTimeMillis())
         val endOfToday = startOfToday + (24 * 60 * 60 * 1000)
         
-        todayRecord = dao.getRecordForDate(startOfToday, endOfToday).stateIn(
+        val sessionStatus = SupabaseConfig.client.gotrue.sessionStatus
+        
+        todayRecord = sessionStatus.flatMapLatest { status ->
+            when (status) {
+                is SessionStatus.Authenticated -> {
+                    dao.getRecordForDate(status.session.user?.id ?: "", startOfToday, endOfToday)
+                }
+                else -> flowOf(null)
+            }
+        }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = null
         )
 
-        allDailyRecords = dao.getAllDailyRecords().stateIn(
+        allDailyRecords = sessionStatus.flatMapLatest { status ->
+            when (status) {
+                is SessionStatus.Authenticated -> {
+                    dao.getAllDailyRecords(status.session.user?.id ?: "")
+                }
+                else -> flowOf(emptyList())
+            }
+        }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
@@ -65,7 +85,8 @@ class DailyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val startOfToday = getStartOfDay(System.currentTimeMillis())
             val endOfToday = startOfToday + (24 * 60 * 60 * 1000)
-            val existing = dao.getRecordForDateSync(startOfToday, endOfToday) ?: DailyRecord(date = startOfToday)
+            val userId = SupabaseConfig.client.gotrue.currentUserOrNull()?.id ?: ""
+            val existing = dao.getRecordForDateSync(userId, startOfToday, endOfToday) ?: DailyRecord(date = startOfToday, userId = userId)
             
             val updated = existing.copy(
                 readToday = readToday ?: existing.readToday,

@@ -4,8 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rhinepereira.versetrack.data.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import io.github.jan.supabase.gotrue.gotrue
+import io.github.jan.supabase.gotrue.SessionStatus
 
 class NotesViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: PersonalNoteRepository
@@ -18,19 +23,33 @@ class NotesViewModel(application: Application) : AndroidViewModel(application) {
         dao = database.verseDao()
         repository = PersonalNoteRepository(application, dao)
 
-        categories = repository.allCategories.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+        categories = SupabaseConfig.client.gotrue.sessionStatus
+            .flatMapLatest { status ->
+                when (status) {
+                    is SessionStatus.Authenticated -> {
+                        repository.getAllCategories(status.session.user?.id ?: "")
+                    }
+                    else -> flowOf(emptyList())
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
 
-        // Seed predefined categories if empty
+        // Seed predefined categories for the authenticated user if empty
         viewModelScope.launch {
-            repository.allCategories.first { it.isNotEmpty() || true }.let { current ->
-                if (current.isEmpty()) {
-                    repository.insertCategory(PersonalNoteCategory(name = "CYP Talks"))
-                    repository.insertCategory(PersonalNoteCategory(name = "CGS Talks"))
-                    repository.insertCategory(PersonalNoteCategory(name = "Prophecies"))
+            SupabaseConfig.client.gotrue.sessionStatus.collect { status ->
+                if (status is SessionStatus.Authenticated) {
+                    val userId = status.session.user?.id ?: ""
+                    repository.getAllCategories(userId).first().let { current ->
+                        if (current.isEmpty()) {
+                            repository.insertCategory(PersonalNoteCategory(name = "CYP Talks", userId = userId))
+                            repository.insertCategory(PersonalNoteCategory(name = "CGS Talks", userId = userId))
+                            repository.insertCategory(PersonalNoteCategory(name = "Prophecies", userId = userId))
+                        }
+                    }
                 }
             }
         }

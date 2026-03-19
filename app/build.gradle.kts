@@ -62,10 +62,18 @@ dependencies {
 
     // Supabase
     implementation(libs.supabase.postgrest)
+    implementation(libs.supabase.gotrue)
+    implementation(libs.supabase.compose.auth)
+    implementation(libs.supabase.compose.auth.ui)
     implementation(libs.kotlinx.serialization.json)
     
     // Ktor Engine (Required for Supabase)
     implementation(libs.ktor.client.android)
+
+    // Credential Manager (Google Sign-In)
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     // WorkManager
     implementation(libs.androidx.work.runtime.ktx)

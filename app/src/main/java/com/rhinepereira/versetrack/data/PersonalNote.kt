@@ -13,6 +13,8 @@ data class PersonalNoteCategory(
     val id: String = UUID.randomUUID().toString(),
     @SerialName("name")
     val name: String,
+    @SerialName("user_id")
+    val userId: String = "",
     @SerialName("created_at")
     val createdAt: Long = System.currentTimeMillis(),
     @SerialName("is_synced")
@@ -32,6 +34,8 @@ data class PersonalNote(
     val content: String,
     @SerialName("date")
     val date: Long, // normalized to start of day
+    @SerialName("user_id")
+    val userId: String = "",
     @SerialName("created_at")
     val createdAt: Long = System.currentTimeMillis(),
     @SerialName("is_synced")

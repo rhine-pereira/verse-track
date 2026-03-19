@@ -7,8 +7,12 @@ import com.rhinepereira.versetrack.data.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import io.github.jan.supabase.gotrue.gotrue
+import io.github.jan.supabase.gotrue.SessionStatus
 
 class VerseViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: VerseRepository
@@ -17,11 +21,21 @@ class VerseViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val verseDao = AppDatabase.getDatabase(application).verseDao()
         repository = VerseRepository(application, verseDao)
-        allNotesWithVerses = repository.allNotesWithVerses.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+        
+        allNotesWithVerses = SupabaseConfig.client.gotrue.sessionStatus
+            .flatMapLatest { status ->
+                when (status) {
+                    is SessionStatus.Authenticated -> {
+                        repository.getAllNotesWithVerses(status.session.user?.id ?: "")
+                    }
+                    else -> flowOf(emptyList())
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = emptyList()
+            )
         
         // Initial fetch from cloud to populate local database if empty
         fetchCloudData()

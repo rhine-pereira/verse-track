@@ -264,11 +264,13 @@ fun FullScreenNoteEditor(
 ) {
     var title by remember { mutableStateOf(note.title) }
     var contentValue by remember { mutableStateOf(TextFieldValue(note.content)) }
-    val scrollState = rememberScrollState()
     val context = LocalContext.current
     val bibleHelper = remember { BibleDatabaseHelper(context) }
     val boldColor = MaterialTheme.colorScheme.primary
     
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var lastContentValue by remember { mutableStateOf<TextFieldValue?>(null) }
     var detectedReference by remember { mutableStateOf<BibleRef?>(null) }
 
     LaunchedEffect(title, contentValue.text) {
@@ -314,6 +316,7 @@ fun FullScreenNoteEditor(
                 }
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             Column {
                 AnimatedVisibility(
@@ -383,7 +386,22 @@ fun FullScreenNoteEditor(
                                                 newSelection = TextRange(selection.start + appendText.length)
                                             }
                                             
+                                            val oldContent = contentValue
                                             contentValue = contentValue.copy(text = newText, selection = newSelection)
+                                            
+                                            scope.launch {
+                                                lastContentValue = oldContent
+                                                val result = snackbarHostState.showSnackbar(
+                                                    message = "Verse added",
+                                                    actionLabel = "Undo",
+                                                    duration = SnackbarDuration.Short
+                                                )
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    lastContentValue?.let {
+                                                        contentValue = it
+                                                    }
+                                                }
+                                            }
                                         }
                                         detectedReference = null 
                                     }) {
@@ -429,7 +447,6 @@ fun FullScreenNoteEditor(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(scrollState)
                 .padding(16.dp)
         ) {
             TextField(
@@ -453,7 +470,9 @@ fun FullScreenNoteEditor(
                     contentValue = handleAutoList(contentValue, newValue)
                 },
                 placeholder = { Text("Note") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
                     unfocusedContainerColor = Color.Transparent,
@@ -464,7 +483,6 @@ fun FullScreenNoteEditor(
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 visualTransformation = MarkdownVisualTransformation(boldColor)
             )
-            Spacer(modifier = Modifier.height(100.dp))
         }
     }
 }

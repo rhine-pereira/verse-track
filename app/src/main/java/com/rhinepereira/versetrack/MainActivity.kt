@@ -5,9 +5,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.rhinepereira.versetrack.ui.AuthState
+import com.rhinepereira.versetrack.ui.AuthViewModel
+import com.rhinepereira.versetrack.ui.LoginScreen
 import com.rhinepereira.versetrack.ui.MainContainer
 import com.rhinepereira.versetrack.ui.theme.VerseTrackTheme
 
@@ -21,10 +31,29 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             VerseTrackTheme {
-                MainContainer(
-                    sharedText = sharedText,
-                    onSharedTextConsumed = { sharedText = null }
-                )
+                val authViewModel: AuthViewModel = viewModel()
+                val authState by authViewModel.authState.collectAsState()
+
+                when (authState) {
+                    is AuthState.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    is AuthState.SignedOut -> {
+                        LoginScreen()
+                    }
+                    is AuthState.SignedIn -> {
+                        MainContainer(
+                            sharedText = sharedText,
+                            onSharedTextConsumed = { sharedText = null },
+                            onSignOut = { authViewModel.signOut() }
+                        )
+                    }
+                }
             }
         }
     }

@@ -3,6 +3,7 @@ package com.rhinepereira.versetrack.data
 import android.content.Context
 import androidx.work.*
 import com.rhinepereira.versetrack.sync.SyncWorker
+import io.github.jan.supabase.gotrue.gotrue
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
@@ -10,22 +11,26 @@ import kotlinx.coroutines.withContext
 
 class VerseRepository(private val context: Context, private val verseDao: VerseDao) {
 
-    val allNotesWithVerses: Flow<List<NoteWithVerses>> = verseDao.getNotesWithVerses()
+    fun getAllNotesWithVerses(userId: String): Flow<List<NoteWithVerses>> = verseDao.getNotesWithVerses(userId)
 
     fun getVersesForNote(noteId: String): Flow<List<Verse>> = verseDao.getVersesForNote(noteId)
 
+    private fun getCurrentUserId(): String {
+        return SupabaseConfig.client.gotrue.currentUserOrNull()?.id ?: ""
+    }
+
     suspend fun insertNote(note: Note) {
-        verseDao.insertNote(note.copy(isSynced = false))
+        verseDao.insertNote(note.copy(isSynced = false, userId = getCurrentUserId()))
         scheduleSync()
     }
 
     suspend fun insertVerse(verse: Verse) {
-        verseDao.insertVerse(verse.copy(isSynced = false))
+        verseDao.insertVerse(verse.copy(isSynced = false, userId = getCurrentUserId()))
         scheduleSync()
     }
 
     suspend fun updateVerse(verse: Verse) {
-        verseDao.updateVerse(verse.copy(isSynced = false))
+        verseDao.updateVerse(verse.copy(isSynced = false, userId = getCurrentUserId()))
         scheduleSync()
     }
 
@@ -57,6 +62,8 @@ class VerseRepository(private val context: Context, private val verseDao: VerseD
 
     suspend fun fetchFromSupabase() = withContext(Dispatchers.IO) {
         try {
+            // With RLS enabled, these queries automatically return only the current user's data
+            
             // Fetch Notes
             val notes = SupabaseConfig.client.postgrest["notes"].select().decodeList<Note>()
             notes.forEach { note ->

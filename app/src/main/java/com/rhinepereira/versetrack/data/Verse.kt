@@ -15,6 +15,8 @@ data class Note(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
     val theme: String,
+    @SerialName("user_id")
+    val userId: String = "",
     @SerialName("created_at")
     val createdAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false
@@ -39,6 +41,8 @@ data class Verse(
     val noteId: String,
     val reference: String,
     val content: String,
+    @SerialName("user_id")
+    val userId: String = "",
     @SerialName("created_at")
     val createdAt: Long = System.currentTimeMillis(),
     val isSynced: Boolean = false
