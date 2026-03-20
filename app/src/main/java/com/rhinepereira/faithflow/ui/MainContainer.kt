@@ -2,7 +2,6 @@ package com.rhinepereira.faithflow.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
@@ -20,7 +19,6 @@ import androidx.navigation.compose.rememberNavController
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Themes : Screen("themes", "Themes", Icons.Default.List)
     object Daily : Screen("daily", "Daily", Icons.Default.Edit)
-    object Calendar : Screen("calendar", "Calendar", Icons.Default.DateRange)
     object PersonalNotes : Screen("personal_notes", "Notes", Icons.Default.MoreVert)
 }
 
@@ -32,7 +30,7 @@ fun MainContainer(
     onSignOut: () -> Unit = {}
 ) {
     val navController = rememberNavController()
-    val items = listOf(Screen.Themes, Screen.Calendar, Screen.PersonalNotes)
+    val items = listOf(Screen.Themes, Screen.PersonalNotes)
     var showSignOutDialog by remember { mutableStateOf(false) }
 
     Scaffold(

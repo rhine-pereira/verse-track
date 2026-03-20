@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatListNumbered
@@ -35,6 +36,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -71,10 +73,9 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var noteToDelete by remember { mutableStateOf<PersonalNote?>(null) }
     var categoryToDelete by remember { mutableStateOf<PersonalNoteCategory?>(null) }
-    var isEditMode by remember { mutableStateOf(false) }
+    var showReorderDialog by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
-    val editableCategories = remember { mutableStateListOf<PersonalNoteCategory>() }
     
     val pullRefreshState =  rememberPullRefreshState(
         refreshing = isRefreshing,
@@ -88,13 +89,6 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
     )
 
     val pagerState = rememberPagerState(pageCount = { categories.size })
-
-    LaunchedEffect(isEditMode) {
-        if (isEditMode) {
-            editableCategories.clear()
-            editableCategories.addAll(categories)
-        }
-    }
 
     if (noteToEdit != null) {
         Dialog(
@@ -123,119 +117,34 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isEditMode) {
-                    Text("Edit mode: drag tabs to reorder", style = MaterialTheme.typography.labelMedium)
-                } else {
-                    Spacer(modifier = Modifier.width(1.dp))
-                }
+                Spacer(modifier = Modifier.width(1.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { showAddCategoryDialog = true }) {
                         Text("Add Category")
                     }
 
-                    TextButton(
-                        onClick = {
-                            if (isEditMode) {
-                                val currentId = categories.getOrNull(pagerState.currentPage)?.id
-                                viewModel.reorderCategories(editableCategories.toList())
-                                isEditMode = false
-                                currentId?.let { selectedId ->
-                                    val targetIndex = editableCategories.indexOfFirst { it.id == selectedId }
-                                    if (targetIndex >= 0) {
-                                        coroutineScope.launch { pagerState.scrollToPage(targetIndex) }
-                                    }
-                                }
-                            } else {
-                                isEditMode = true
-                            }
-                        }
-                    ) {
-                        Text(if (isEditMode) "Done" else "Edit Tabs")
+                    TextButton(onClick = { showReorderDialog = true }) {
+                        Text("Reorder")
                     }
                 }
             }
 
-            if (isEditMode) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    editableCategories.forEach { category ->
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            tonalElevation = 2.dp,
-                            modifier = Modifier
-                                .pointerInput(editableCategories.size, category.id) {
-                                    var accumulatedDragX = 0f
-                                    val swapThreshold = 28f
-                                    detectDragGesturesAfterLongPress(
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val currentIndex = editableCategories.indexOfFirst { it.id == category.id }
-                                            if (currentIndex == -1) return@detectDragGesturesAfterLongPress
-
-                                            accumulatedDragX += dragAmount.x
-
-                                            if (accumulatedDragX > swapThreshold && currentIndex < editableCategories.lastIndex) {
-                                                val next = editableCategories[currentIndex + 1]
-                                                editableCategories[currentIndex + 1] = editableCategories[currentIndex]
-                                                editableCategories[currentIndex] = next
-                                                accumulatedDragX = 0f
-                                            } else if (accumulatedDragX < -swapThreshold && currentIndex > 0) {
-                                                val prev = editableCategories[currentIndex - 1]
-                                                editableCategories[currentIndex - 1] = editableCategories[currentIndex]
-                                                editableCategories[currentIndex] = prev
-                                                accumulatedDragX = 0f
-                                            }
-                                        }
-                                    )
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = category.name,
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                                IconButton(
-                                    onClick = { categoryToDelete = category },
-                                    modifier = Modifier.size(20.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "Delete Category",
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
+            ScrollableTabRow(
+                selectedTabIndex = pagerState.currentPage,
+                edgePadding = 16.dp,
+                divider = {}
+            ) {
+                categories.forEachIndexed { index: Int, category: PersonalNoteCategory ->
+                    Tab(
+                        selected = pagerState.currentPage == index,
+                        onClick = {
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(index)
                             }
-                        }
-                    }
-                }
-            } else {
-                ScrollableTabRow(
-                    selectedTabIndex = pagerState.currentPage,
-                    edgePadding = 16.dp,
-                    divider = {}
-                ) {
-                    categories.forEachIndexed { index: Int, category: PersonalNoteCategory ->
-                        Tab(
-                            selected = pagerState.currentPage == index,
-                            onClick = {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(index)
-                                }
-                            },
-                            text = { Text(category.name) }
-                        )
-                    }
+                        },
+                        text = { Text(category.name) }
+                    )
                 }
             }
         }
@@ -360,6 +269,25 @@ fun NotesScreen(viewModel: NotesViewModel = viewModel()) {
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    if (showReorderDialog) {
+        ReorderCategoriesDialog(
+            categories = categories,
+            onDismiss = { showReorderDialog = false },
+            onConfirm = { reorderedCategories ->
+                val currentId = categories.getOrNull(pagerState.currentPage)?.id
+                viewModel.reorderCategories(reorderedCategories)
+                showReorderDialog = false
+                currentId?.let { selectedId ->
+                    val targetIndex = reorderedCategories.indexOfFirst { it.id == selectedId }
+                    if (targetIndex >= 0) {
+                        coroutineScope.launch { pagerState.scrollToPage(targetIndex) }
+                    }
+                }
+            },
+            onDelete = { category -> categoryToDelete = category }
         )
     }
 }
@@ -847,8 +775,8 @@ fun AddCategoryDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
         title = { Text("New Category") },
         text = {
             TextField(
-                value = name, 
-                onValueChange = { name = it }, 
+                value = name,
+                onValueChange = { name = it },
                 label = { Text("Category Name") },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
             )
@@ -860,5 +788,175 @@ fun AddCategoryDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+fun ReorderCategoriesDialog(
+    categories: List<PersonalNoteCategory>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<PersonalNoteCategory>) -> Unit,
+    onDelete: (PersonalNoteCategory) -> Unit
+) {
+    val editableCategories = remember { mutableStateListOf<PersonalNoteCategory>().apply { addAll(categories) } }
+    var draggedCategoryId by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.7f),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+            ) {
+                Text(
+                    "Reorder Categories",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    "Long press and drag to reorder",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    editableCategories.forEachIndexed { _, category ->
+                        val isDragging = draggedCategoryId == category.id
+                        val itemHeight = 64.dp
+                        val spacingHeight = 8.dp
+                        val totalItemHeight = itemHeight + spacingHeight
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            tonalElevation = if (isDragging) 16.dp else 2.dp,
+                            shadowElevation = if (isDragging) 24.dp else 0.dp,
+                            color = if (isDragging)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    if (isDragging) {
+                                        translationY = dragOffset
+                                        scaleX = 1.05f
+                                        scaleY = 1.05f
+                                    }
+                                }
+                                .pointerInput(editableCategories.size) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggedCategoryId = category.id
+                                            dragOffset = 0f
+                                        },
+                                        onDragEnd = {
+                                            draggedCategoryId = null
+                                            dragOffset = 0f
+                                        },
+                                        onDragCancel = {
+                                            draggedCategoryId = null
+                                            dragOffset = 0f
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            dragOffset += dragAmount.y
+
+                                            // Find current position of the dragged item
+                                            val currentIndex = editableCategories.indexOfFirst { it.id == category.id }
+
+                                            if (currentIndex != -1) {
+                                                // Calculate target position based on accumulated drag offset
+                                                val displacement = (dragOffset / totalItemHeight.toPx()).toInt()
+                                                val targetIndex = (currentIndex + displacement).coerceIn(0, editableCategories.lastIndex)
+
+                                                // Move item if we've crossed a boundary
+                                                if (targetIndex != currentIndex) {
+                                                    val item = editableCategories.removeAt(currentIndex)
+                                                    editableCategories.add(targetIndex, item)
+
+                                                    // Adjust drag offset to compensate for the position change
+                                                    dragOffset -= (targetIndex - currentIndex) * totalItemHeight.toPx()
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.DragHandle,
+                                    contentDescription = "Drag to reorder",
+                                    tint = if (isDragging)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Text(
+                                    text = category.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = if (isDragging) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = { onDelete(category) },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete Category",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onConfirm(editableCategories.toList()) }) {
+                        Text("Save")
+                    }
+                }
+            }
+        }
+    }
 }
 
